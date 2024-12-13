@@ -1,20 +1,14 @@
 ---
-title: "Homework Template"
+title: "Reproducible Science"
 output:
   html_document: default
   pdf_document: default
-date: "2023-10-09"
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-*The following is a template .rmd RMarkdown file for you to use for your homework submission.*
-
-*Please Knit your .rmd to a PDF format or HTML and submit that with no identifiers like your name.*
-
-*To create a PDF, first install tinytex and load the package. Then press the Knit arrow and select "Knit to PDF".*
 
 ```{r} 
 # Libraries
@@ -23,7 +17,16 @@ library(palmerpenguins)
 library(here)
 library(janitor)
 library(ggplot2)
+library(ragg)
+library(svglite)
+library(dplyr)
 ```
+
+```{r}
+# Functions 
+source(here("functions", "save_plot.R"))
+```
+
 
 ## QUESTION 01: Data Visualisation for Science Communication
 
@@ -40,15 +43,15 @@ library(ggplot2)
 
 ```{r bad figure code, echo=FALSE}
 
-culmen_width <- penguins_raw_view %>% 
+culmen_width <- penguins_raw %>% 
     select('Body Mass (g)', 'Culmen Depth (mm)')
 
 
 culmen_scatter_graph <- ggplot(data = culmen_width, 
                           aes(x = `Body Mass (g)`, 
                               y = `Culmen Depth (mm)`)) +
-                          geom_point(aes(color = "#FFCE1B"), show.legend = FALSE) +
-                          geom_smooth(method = "lm", se = FALSE)
+                          geom_point(color = "#FFCE1B", show.legend = FALSE) +
+                          geom_smooth(method = "lm", se = FALSE, color = "#FFCE1B")
 culmen_scatter_graph
 
 # There is no need to provide the code for your bad figure, just use echo=FALSE so the code is hidden. Make sure your figure is visible after you knit it. 
@@ -57,122 +60,166 @@ culmen_scatter_graph
 
 ### b) Write about how your design choices mislead the reader about the underlying data (200-300 words).
 
-*Include references.*
+My graph plots culmen depth against body mass, which is itself misleading as both variables are unlikely to be independent if confounding variables such as species. This issue of confounding variables is exacerbated by the regression line that has been added to the graph. It is a single regression line that runs through all points in the plot, which may not be reasonable give two visible groups of data points can be observed (Baker, 2016). If a line were to be plotted through these smaller populations of individuals, the relationship between culmen length and body mass would likely be positive. An exploratory figure such as this should avoid plotting such regression lines for this reason. 
 
+Additionally, all points on the graph are the same, hard to see colour. The regression line is also coloured in this yellow, making the graph harder to read. This colour scheme is further hindered by the grey background and unhelpful grid lines present on the graph, making it difficult to read information quickly. The axis labels could also be larger and more in proportion, and there could be a title or description to explain the figure.
+
+Overall, this graph does not have a clear objective, and fails to deliver information efficiently due to its colour scheme and scaling.
 ------------------------------------------------------------------------
 
 ## QUESTION 2: Data Pipeline
 
 *Write a data analysis pipeline in your .rmd RMarkdown file. You should be aiming to write a clear explanation of the steps, the figures visible, as well as clear code.*
 
-*Your code should include the steps practiced in the lab session:*
+## Introduction 
 
--   *Load the data*
+This analysis will aim to identify whether the body mass, or the island of residence of penguins has a bigger impact on flipper length. These variables are taken from the palmerpenguins data set. This comparison is interesting as it considers body mass as a physiological trait of each animal, while considering island of residence as an environmental variable. Analysis will focus on the use of ANCOVA.
+
+## Hypothesis
+
+Body mass is a better predictor of flipper length than island of residence in the palmerpenguins dataset.
+
+```{r}
+# Loading in the data
+write.csv(penguins_raw, here("data", "penguins_raw.csv"))
+penguins_raw <- read.csv(here("data","penguins_raw.csv"))
+# Creates a .csv file copy of our raw data in a 'data' folder within the working directory. Ensures that the raw data we are working with is conserved, rather than being overridden or edited in a way that is untraceable. We then create an object called 'penguins_raw using this .csv file.
+```
+ 
+
+```{r}
+# Cleaning the data
+penguins_clean <- penguins_raw %>%
+  select(-Comments) %>%  
+  select(-starts_with("Delta")) %>%
+  clean_names()
+# The select function is used remove the unwanted comments column, as well as two unwanted delta columns. The clean names function can then be used to format column names uniformly, making it easier for R to recognise and work with our columns during the analysis.
+```
+
+
+
+## Stats Method
+
+The exporatory figure below gives us an indication of a positive correlation between flipper length and body mass. The island plots are not unique enough to determine two particular islands to compare, so we should use an ANCOVA to compare all three.
+
+```{r}
+# Creating an exploratory figure
+island_colours <- c("Biscoe" = "darkorange", # Colouring by island
+                    "Dream" = "purple", 
+                    "Torgersen" = "cyan4")
+
+
+flipper_scatter <- penguins_clean %>% 
+     ggplot() +
+     geom_point (aes(x = body_mass_g, y = flipper_length_mm, color = island)) +
+     facet_wrap(. ~ island) + # Creates three isloated plots, one for each island
+        labs(x = "Body Mass (g)", y = "Flipper Length (mm)") +
+        xlim(2700, 6300) +
+        theme_bw() +
+        theme(legend.position = "none") +
+        scale_color_manual(values = island_colours)
+# Plot of flipper length against body mass, for each island
+
+flipper_scatter
+```
+
+```{r}
+# Saving the figure
+save_flipper_plot_png(flipper_scatter, 
+                       here("figures", "flipper_scatter.png"), 
+                       size = 20, res = 300, scaling = 1.4)
+# The figure is saved using a function found in a separate folder in the repository. This makes it easier for another user to save plots in identical format, while still allowing for edits to scalling and resolution in the main code pipeline.
+```
+
+We use anova() to perform an ancova analysis because R knows that our variables are factors and numerical respectively. Before we proceed with results however, we must test that the data we are using meets key assumptions for the statistical tests we have employed, namely normality and homoscedasticity. The data point follow the line in the Q-Q plot and are evenly distributed above and below y=0 in the residuals plot, so we can proceed.
 
 ```{r}
 
+# Statistical analysis 
+flipper_model <- lm(flipper_length_mm ~ body_mass_g + island, data = penguins_clean)
+anova(flipper_model)
+
+# Sets up a plotting space for a multi-panel figure
+par(mfrow = c(1, 2)) 
+
+# Q-Q plot
+qqnorm(penguins_clean$flipper_length_mm, pch = 1, frame = FALSE)
+qqline(penguins_clean$flipper_length_mm, col = "red", lwd = 2)
+
+# Residual ploted to test for heteroscedasticity
+flipper_res <- resid(flipper_model)
+plot(fitted(flipper_model), flipper_res, xlab="Residuals", ylab="Fitted Values")
+abline(0,0)
+```
+The ANOVA analysis shows 
+
+## Results 
+
+Body mass seems to show significant differences between means, and the ANCOVA performed demonstrates that island has a less statistically significant effect on flipper length than body mass in the dataset. Thus our results figures shows a positive relationship between body mass and flipper length, but no significance withr egards confidence intervals or interquartile range with regards the different islands and flipper length. 
+
+```{r}
+# Creating a results figure
+flipper_boxplot <- penguins_clean %>% 
+ggplot() +
+geom_boxplot(aes(x = body_mass_g, y = flipper_length_mm, color = island)) +
+geom_jitter(aes(x = body_mass_g, y = flipper_length_mm, color = island), alpha = 0.3) +
+facet_wrap(. ~ island) +
+labs(x = "Body Mass (g)", y = "Flipper Length (mm)") +
+xlim(2700, 6300) +
+theme_bw() +
+theme(legend.position = "none") +
+scale_color_manual(values = island_colours)
+
+flipper_boxplot
 ```
 
--   *Appropriately clean the data*
-
--   *Create an Exploratory Figure (**not a boxplot**)*
-
--   *Save the figure*
-
--   ***New**: Run a statistical test*
-
--   ***New**: Create a Results Figure*
-
--   *Save the figure*
-
-*An exploratory figure shows raw data, such as the distribution of the data. A results figure demonstrates the stats method chosen, and includes the results of the stats test.*
-
-*Between your code, communicate clearly what you are doing and why.*
-
-*Your text should include:*
-
--   *Introduction*
-
--   *Hypothesis*
-
--   *Stats Method*
-
--   *Results*
-
--   *Discussion*
-
--   *Conclusion*
-
-*You will be marked on the following:*
-
-### a) Your code for readability and functionality
-
-### b) Your figures for communication
-
-### c) Your text communication of your analysis
-
-*Below is a template you can use.*
-
-------------------------------------------------------------------------
-
-### Introduction
-
-```{r Data Exploration}
-
-# Make sure your code prints. 
-
+```{r}
+# Same function as previous
+save_flipper_plot_png(flipper_boxplot, 
+                       here("figures", "flipper_boxplot.png"), 
+                       size = 20, res = 300, scaling = 1.4)
 ```
 
-### Hypothesis
 
-### Statistical Methods
+## Discussion
 
-```{r Statistics}
+It is likely that other factors in the dataset, such as species, would be confounding variables in this analysis. However, species is likley a large conrtibutor to body mass, so could partially be absorbed into that variable in terms of its effect. My analysis would have benefited from a wider range of variables considered, however this may have influenced the accuracy of certain perameters in the model.
 
-# Make sure your code prints. 
+## Conclusion
 
-```
+Our analysis suggests that body mass does indeed have a greater effect on flipper length than island of residence, which supports my original hypotheis.  
 
-### Results & Discussion
-
-```{r Plotting Results}
-
-# Make sure your code prints. 
-
-```
-
-### Conclusion
-
-------------------------------------------------------------------------
 
 ## QUESTION 3: Open Science
 
 ### a) GitHub
 
-*Upload your RProject you created for **Question 2** and any files and subfolders used to GitHub. Do not include any identifiers such as your name. Make sure your GitHub repo is public.*
-
-*GitHub link:*
-
-*You will be marked on your repo organisation and readability.*
+*GitHub link:* https://github.com/MightyFish24/ReproSciAssignment.git
 
 ### b) Share your repo with a partner, download, and try to run their data pipeline.
 
-*Partner's GitHub link:*
-
-*You **must** provide this so I can verify there is no plagiarism between you and your partner.*
+*Partners GitHub link:* https://github.com/eggyolk2000/Rep-Fig-Q2.git
 
 ### c) Reflect on your experience running their code. (300-500 words)
 
--   *What elements of your partner's code helped you to understand their data pipeline?*
+My partner used new objects consistently and stuck to core principles of reproducibility, such as not overwriting objects in their code. This made it easier to follow individual steps, as well as the annotations accompanying the code. Clarity was further aided by the use of pipes in the script, as this streamlined sections of code that would have had to be repeated multiple times if pipes were not used. Further aiding in communication was the length of individual lines of code. Long lines of code may mean it is necessary to scroll across the script, making code inaccessible to read and is bad practice, This was avoided in the case of my partner's script. 
 
--   *Did it run? Did you need to fix anything?*
+My partners script ran correctly at all points, and as such no editing or additional downloading of data frames or functions was necessary for the script to function. However, the large blocks of code used by my partner did make the code more difficult to run in that multiple outputs from the code would appear each time a code block was run. If fewer outputs were present from each code block then the script would have been easier to follow.
 
--   *What suggestions would you make for improving their code to make it more understandable or reproducible, and why?*
+My partner kept unnecessary code sections in their final script, such as head() and colnames(). These functions aid in understanding the logical process of the script but make it less accessible, as it requires filtering through unwanted outputs to find relevant ones. My partner could have also streamlined their code further by using functions. Not only are functions helpful for consistent outputs of figures, data organisation and models, but if held in separate folders they also make the main pipeline more concise. My partner also could have improved their plots
 
--   *If you needed to alter your partner's figure using their code, do you think that would be easy or difficult, and why?*
+My partners figures were accessible in the main pipeline, and therefore would be easy to adjust in terms of scaling and format. It would be easier to apply my partner's standardised plot to other data sets though if a function had been used. Additionally, if I wanted to use my partner's data cleaning code for my own figures I would have difficulty as it incudes steps specific to my partner's variables of interest.
 
 ### d) Reflect on your own code based on your experience with your partner's code and their review of yours. (300-500 words)
 
--   *What improvements did they suggest, and do you agree?*
+My partner focused on my results graph, and I agree that this was the weakest point of my analysis. I do not believe ANCOVA analysis to be the easiest to plot in a results graph, and I disagree that a box plot is a poor choice for communicating the results of an ANCOVA, however I could have made improvements. 
 
--   *What did you learn about writing code for other people?*
+Primarily, I should have include results form my statistical analysis direct on my graph, this would have aided in my communication. I also could have annotated this section better, however I believe I chose a plot that required knowledge beyond that I currently posses in order to code an effective graph. 
+
+Coding for others requires attention to detail and commitment to consistency. In terms of my R script, I feel the most important aspects of coding in a reproducible way are being concise and consistent, and then explaining your code steps clearly throughout. Using a repository on GitHub was more challenging than anticipated due to the disconnect between the user interface on GitHub's browser page and in R studio. 
+
+In future I will be aware to take care when deleting or moving files liked to my repository, as this has made the process challenging due to conflicts between branches of my repository being different. I now believe I am capable of using GitHub to share repositories from R studio with peers.
+
+## Bibliography
+
+Baker, M. 1,500 scientists lift the lid on reproducibility. Nature 533, 452–454 (2016). https://doi.org/10.1038/533452a
